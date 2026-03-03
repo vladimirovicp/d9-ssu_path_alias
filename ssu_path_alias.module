@@ -1,0 +1,100 @@
+<?php
+
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\node\NodeInterface;
+
+/**
+ * Implements hook_entity_presave().
+ */
+function ssu_path_alias_entity_presave(EntityInterface $entity) {
+  if ($entity instanceof NodeInterface && $entity->bundle() == 'news') {
+    $title = $entity->getTitle();
+    $referenced_entity = $entity->get('field_news_link')->entity;
+
+    if (!empty($referenced_entity)) {
+      if (!empty($entity->path->pathauto)) {
+
+        $pub_date = $entity->get('field_publ_date')->value;
+        $year = !empty($pub_date) ? date('Y', strtotime($pub_date)) : date('Y');
+
+        $segments = _ssu_path_alias_build_subdivision_segments($referenced_entity);
+        $segments_str = implode('/', $segments);
+
+        $path = '/struktura/' . $segments_str . '/news/' . $year . '/' . processTitleForAlias($title);
+
+        $entity->path->pathauto = FALSE;
+        $entity->path->alias = $path;
+
+      }
+    }
+
+  }
+
+}
+
+/**
+ * Рекурсивно собирает сегменты пути из цепочки подразделений.
+ *
+ * Начинает с переданного подразделения и поднимается по field_parent_link,
+ * пока не дойдёт до ноды 759 («Структура»). Из каждого подразделения
+ * берётся значение поля field_dep_main_path_element.
+ *
+ * @param \Drupal\node\NodeInterface $subdivision
+ *   Начальная нода подразделения.
+ * @param int $max_depth
+ *   Максимальная глубина обхода (защита от бесконечного цикла).
+ *
+ * @return string[]
+ *   Массив сегментов пути от верхнего уровня к нижнему.
+ */
+function _ssu_path_alias_build_subdivision_segments(NodeInterface $subdivision, $max_depth = 5) {
+  $segments = [];
+  $current = $subdivision;
+
+  for ($i = 0; $i < $max_depth; $i++) {
+    $path_element = $current->get('field_dep_main_path_element')->value;
+    if (!empty($path_element)) {
+      $segments[] = processTitleForAlias($path_element);
+    }
+
+    $parent = $current->get('field_parent_link')->entity;
+
+    if (!$parent instanceof NodeInterface || (int) $parent->id() === 759) {
+      break;
+    }
+
+    $current = $parent;
+  }
+
+  return array_reverse($segments);
+}
+
+
+function processTitleForAlias($title, $max_length = 80) {
+  $title = (string) $title;
+
+  if (\Drupal::hasService('pathauto.alias_cleaner')) {
+    /** @var \Drupal\pathauto\AliasCleanerInterface $cleaner */
+    $cleaner = \Drupal::service('pathauto.alias_cleaner');
+    $options = [
+      'separator' => '-',
+      'max_length' => (int) $max_length,
+      'transliterate' => TRUE,
+    ];
+    return $cleaner->cleanString($title, $options, 'ru');
+  }
+
+  $transliteration = \Drupal::transliteration();
+  $processed = $transliteration->transliterate($title, 'ru', '-', TRUE);
+  $processed = strtolower($processed);
+  $processed = preg_replace('/[^a-z0-9\-\/]+/i', '-', $processed);
+  $processed = preg_replace('/-+/', '-', $processed);
+  $processed = trim($processed, '-');
+
+  if (strlen($processed) > $max_length) {
+    $processed = substr($processed, 0, $max_length);
+    $processed = rtrim($processed, '-');
+  }
+
+  return $processed;
+}

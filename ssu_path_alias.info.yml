@@ -1,0 +1,5 @@
+name: SSU Path Alias
+type: module
+description: 'Модуль для изменения синонимов URL.'
+core_version_requirement: ^9
+package: SSU
